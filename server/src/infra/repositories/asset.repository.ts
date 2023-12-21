@@ -24,7 +24,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import _ from 'lodash';
 import { DateTime } from 'luxon';
-import { And, FindOptionsRelations, FindOptionsWhere, In, IsNull, LessThan, Not, Repository } from 'typeorm';
+import { And, Brackets, FindOptionsRelations, FindOptionsWhere, In, IsNull, LessThan, Not, Repository } from 'typeorm';
 import { AssetEntity, AssetJobStatusEntity, AssetType, ExifEntity, SmartInfoEntity } from '../entities';
 import { DummyValue, GenerateSql } from '../infra.util';
 import { Chunked, ChunkedArray, OptionalBetween, paginate } from '../infra.utils';
@@ -258,7 +258,9 @@ export class AssetRepository implements IAssetRepository {
         faces: {
           person: true,
         },
-        stack: true,
+        stack: {
+          assets: true,
+        },
       };
     }
     return this.repository.find({
@@ -369,7 +371,9 @@ export class AssetRepository implements IAssetRepository {
           person: true,
         },
         library: true,
-        stack: true,
+        stack: {
+          assets: true,
+        },
       };
     }
 
@@ -774,8 +778,14 @@ export class AssetRepository implements IAssetRepository {
       builder = builder.andWhere('asset.type = :assetType', { assetType });
     }
 
+    let stackJoined = false;
+
     if (exifInfo !== false) {
-      builder = builder.leftJoinAndSelect('asset.exifInfo', 'exifInfo').leftJoinAndSelect('asset.stack', 'stack');
+      stackJoined = true;
+      builder = builder
+        .leftJoinAndSelect('asset.exifInfo', 'exifInfo')
+        .leftJoinAndSelect('asset.stack', 'stack')
+        .leftJoinAndSelect('stack.assets', 'stackedAssets');
     }
 
     if (albumId) {
@@ -806,7 +816,12 @@ export class AssetRepository implements IAssetRepository {
     }
 
     if (withStacked) {
-      builder = builder.andWhere('asset.stackParentId IS NULL');
+      if (!stackJoined) {
+        builder = builder.leftJoinAndSelect('asset.stack', 'stack').leftJoinAndSelect('stack.assets', 'stackedAssets');
+      }
+      builder = builder.andWhere(
+        new Brackets((qb) => qb.where('stack.primaryAssetId = asset.id').orWhere('asset.stackId IS NULL')),
+      );
     }
 
     return builder;
